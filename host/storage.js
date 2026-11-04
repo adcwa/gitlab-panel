@@ -1,0 +1,13 @@
+import { z } from 'zod'
+const s = z.string().max(16000), id = z.string().min(1).max(160), sha = z.string().regex(/^[0-9a-f]{40,64}$/)
+export const targetSchema = z.object({ provider: z.literal('gitlab'), connectionId: id, projectId: z.union([z.string().regex(/^[1-9]\d{0,14}$/), z.number().int().positive()]).transform(String), checkoutId: id, subdirectory: z.string().max(1000).default(''), targetBranch: z.string().min(1).max(240), executionMode: z.literal('new-worktree'), deliveryPolicy: z.literal('draft-mr-manual') }).strict()
+const identity = z.object({ id: z.number().int().positive(), username: s, name: s }).strict()
+const project = z.object({ id, name: s, pathWithNamespace: s, defaultBranch: z.string().nullable(), webUrl: s }).strict()
+const remote = z.object({ name: id, fetchUrl: s, pushUrl: s }).strict()
+const connection = z.object({ id, name: s, baseUrl: s, identity, state: z.enum(['connected', 'disconnected']), createdAt: s }).strict()
+const checkout = z.object({ id, connectionId: id, projectId: id, path: s, defaultBranch: z.string().nullable(), project, remote, createdAt: s }).strict()
+const environment = z.object({ id, state: z.enum(['preparing', 'ready', 'unknown']), taskId: id, preparationId: id, sessionId: id, codeTarget: targetSchema, planHash: id, path: s.optional(), worktreePath: s.optional(), executionCwd: s.optional(), branch: s, baseCommit: sha, sourceRoot: s, createdAt: s }).strict()
+const mr = z.object({ id: z.number().int().positive(), iid: z.number().int().positive(), title: s, description: s, sourceBranch: s, targetBranch: s, sha: s, state: s, draft: z.boolean(), webUrl: s }).strict()
+const delivery = z.object({ id, state: z.enum(['prepared', 'pushing', 'pushed', 'publishing', 'verified', 'unknown']), environmentId: id, taskId: id, resultRevision: z.union([z.number().int().nonnegative(), id]), headSha: sha, title: s, description: s, marker: s, sourceBranch: s, targetBranch: s, connectionId: id, projectId: id, remote, project, createdAt: s, intent: z.enum(['push', 'publish']).optional(), mr: mr.optional(), verifiedAt: s.optional(), priorDeliveryId: id.optional(), priorHeadSha: sha.optional(), priorMR: mr.optional(), raceLimits: z.array(s).max(4).optional() }).strict().refine(d => [d.priorDeliveryId, d.priorHeadSha, d.priorMR].every(v => v === undefined) || [d.priorDeliveryId, d.priorHeadSha, d.priorMR].every(v => v !== undefined), 'Continuation binding must be complete')
+export const schemas = { connections: connection, checkouts: checkout, environments: environment, deliveries: delivery }
+export const domainSpec = { name: 'local_gitlab_workspace', version: 1, layout: 'per-record', tables: Object.fromEntries(Object.entries(schemas).map(([key, valueSchema]) => [key, { valueSchema }])) }
