@@ -14,11 +14,26 @@ export class GitLabWorkspace {
   async put(name, value) { schemas[name].parse(value); await this.table(name).put(value.id, copy(value)); return copy(value) }
   async list(name) { await this.ready(); const values = [...this.table(name).entries()].map(([, value]) => copy(value)); return values.slice(-200).reverse() }
   async connection(id) { const c = await this.get('connections', id); if (c.state !== 'connected') fail('DISCONNECTED', 'Reconnect the original GitLab identity'); return c }
-  capabilities() { return { provider: 'gitlab', workflowVersion: 2, environmentInspection: true, reviewFacts: true, sameMrContinuation: true, worktreeAvailability: 'resolved-at-session-start', executionModes: ['new-worktree'], deliveryPolicies: ['draft-mr-manual'], nativeWorktrees: Boolean(this.ctx.get('worktrees')), credentials: Boolean(this.ctx.get('credentials')), durableStorage: Boolean(this.ctx.get('storageDomain')), autoFetch: false, autoPush: false, worktreeIsSandbox: false } }
+  capabilities() { return { provider: 'gitlab', workflowVersion: 2, credentialAddressFormat: 'scope/id', credentialSaveStages: true, environmentInspection: true, reviewFacts: true, sameMrContinuation: true, worktreeAvailability: 'resolved-at-session-start', executionModes: ['new-worktree'], deliveryPolicies: ['draft-mr-manual'], nativeWorktrees: Boolean(this.ctx.get('worktrees')), credentials: Boolean(this.ctx.get('credentials')), durableStorage: Boolean(this.ctx.get('storageDomain')), autoFetch: false, autoPush: false, worktreeIsSandbox: false } }
   async status() { await this.ready(); const connections = await this.list('connections'); for (const c of connections) c.credentialConfigured = (await this.ctx.get('credentials').describeRecord(this.api.key(c.id))).configured; return { connections, checkouts: await this.list('checkouts'), environments: await this.list('environments'), deliveries: await this.list('deliveries'), capabilities: this.capabilities() } }
   saveConnection(input) { return this.serial(async () => {
     await this.ready(); const id = input.id ? identifier(input.id) : uid('connection'); const previous = this.table('connections').get(id); if (input.id && !previous) fail('NOT_FOUND', 'Connection not found'); const c = { id, name: text(input.name, 'name', 100), baseUrl: baseUrl(input.baseUrl), createdAt: previous?.createdAt ?? now(), state: 'connected' }
-    const token = text(input.token, 'PAT', 4096); if (/\s/.test(token)) fail('INVALID_ARGUMENT', 'PAT cannot contain whitespace'); if (previous && previous.baseUrl !== c.baseUrl) fail('CONNECTION_IMMUTABLE', 'Create a new connection for another GitLab base URL'); c.identity = await this.api.identity(c, token); if (previous && previous.identity.id !== c.identity.id) fail('IDENTITY_CHANGED', 'Create a new connection for another GitLab user'); await this.ctx.get('credentials').modifyRecord(this.api.key(id), async () => ({ kind: 'api-key', key: token })); return this.put('connections', c)
+    const token = text(input.token, 'PAT', 4096)
+    if (/\s/.test(token)) fail('INVALID_ARGUMENT', 'PAT cannot contain whitespace')
+    if (previous && previous.baseUrl !== c.baseUrl) fail('CONNECTION_IMMUTABLE', 'Create a new connection for another GitLab base URL')
+    c.identity = await this.api.identity(c, token)
+    if (previous && previous.identity.id !== c.identity.id) fail('IDENTITY_CHANGED', 'Create a new connection for another GitLab user')
+    try {
+      await this.ctx.get('credentials').modifyRecord(this.api.key(id), async () => ({ kind: 'api-key', key: token }))
+    } catch (error) {
+      // Never forward provider exception text: it can contain a credential.
+      if (['EACCES', 'EPERM', 'EROFS'].includes(error?.code)) fail('CREDENTIAL_STORE_PERMISSION', 'GitLab identity verified, but credential storage is not writable. Check credential-store permissions; no successful save is recorded.')
+      if (error instanceof TypeError && /credential key .*must (?:be|match)/.test(error.message)) fail('CREDENTIAL_STORE_FORMAT', 'GitLab identity verified, but the credential store contains an incompatible record address. Repair or migrate the credential store before saving; do not replace the whole store.')
+      fail('CREDENTIAL_SAVE_FAILED', 'GitLab identity verified, but credential saving was not confirmed. Check the credential store format and permissions before retrying.')
+    }
+    try { return await this.put('connections', c) } catch {
+      fail('CONNECTION_SAVE_UNKNOWN', 'GitLab identity verified and credentials saved, but saving connection metadata was not confirmed. Refresh connection status before retrying.')
+    }
   }) }
   disconnect(input) { return this.serial(async () => { confirm(input.confirm); const c = await this.get('connections', input.connectionId); await this.put('connections', { ...c, state: 'disconnected' }); await this.ctx.get('credentials').deleteRecord(this.api.key(c.id)); return { disconnected: true, connectionId: c.id } }) }
   async projects(input) { const c = await this.connection(input.connectionId); return this.api.projects(c, input.search, input.page) }

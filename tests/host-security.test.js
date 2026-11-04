@@ -10,7 +10,7 @@ test('HTTPS base URL rejects credential leakage and ambiguous API roots', () => 
   for (const value of ['http://git.example', 'https://user:secret@git.example', 'https://git.example?q=token', 'https://git.example/#token', 'https://git.example/%2fhidden', 'file:///tmp']) assert.throws(() => baseUrl(value))
 })
 test('API uses credential records, disables redirects, bounds and redacts responses', async () => {
-  const seen = [], credentials = { readRecord: async key => { assert.equal(key, 'local.gitlab-panel.c'); return { kind: 'api-key', key: 'secret-pat' } } }
+  const seen = [], credentials = { readRecord: async key => { assert.equal(key, 'gitlab-panel/c-63'); return { kind: 'api-key', key: 'secret-pat' } } }
   const api = new GitLabApi({ credentials, fetch: async (url, init) => { seen.push({ url, init }); return Response.json({ id: 42, username: 'secret-pat', name: 'User' }) } })
   assert.deepEqual(await api.identity({ id: 'c', baseUrl: 'https://git.example' }), { id: 42, username: '[credential redacted]', name: 'User' })
   assert.equal(seen[0].init.redirect, 'error'); assert.equal(seen[0].init.headers['PRIVATE-TOKEN'], 'secret-pat'); assert.equal(seen[0].url, 'https://git.example/api/v4/user')

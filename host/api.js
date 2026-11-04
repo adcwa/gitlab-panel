@@ -4,7 +4,7 @@ export function projectView(p, base) { return { id: projectId(p.id), name: Strin
 export function mrView(m, base) { return { id: m.id, iid: m.iid, title: String(m.title ?? '').slice(0, 256), description: String(m.description ?? '').slice(0, 12000), sourceBranch: String(m.source_branch ?? '').slice(0, 240), targetBranch: String(m.target_branch ?? '').slice(0, 240), sha: String(m.sha ?? ''), state: String(m.state ?? ''), draft: m.draft === true || /^Draft:/i.test(m.title ?? ''), webUrl: safeWebUrl(m.web_url, base) } }
 export class GitLabApi {
   constructor({ credentials, fetch = globalThis.fetch }) { this.credentials = credentials; this.fetch = fetch }
-  key(id) { return `local.gitlab-panel.${id}` }
+  key(id) { return `gitlab-panel/c-${Buffer.from(id, 'utf8').toString('hex')}` }
   async request(connection, path, { method = 'GET', body, token, allow404 = false } = {}) {
     const base = baseUrl(connection.baseUrl)
     if (!path.startsWith('/') || path.startsWith('//') || path.includes('..')) fail('INVALID_ARGUMENT', 'Invalid API path')
